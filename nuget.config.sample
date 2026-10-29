@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copy to nuget.config in the root of an app's repository (next to its .sln) so builds find Kinichit.Communication.
+  No token here: each developer adds credentials once on their PC (see README, "Use it in a project").
+-->
+<configuration>
+  <packageSources>
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+    <add key="kinichit" value="https://nuget.pkg.github.com/SantoshRamancha/index.json" />
+  </packageSources>
+  <packageSourceMapping>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+    <packageSource key="kinichit">
+      <package pattern="Kinichit.*" />
+    </packageSource>
+  </packageSourceMapping>
+</configuration>

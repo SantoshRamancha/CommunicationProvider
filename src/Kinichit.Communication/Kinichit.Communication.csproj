@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kinichit.Communication</RootNamespace>
+
+    <!-- Shared library: no reference to any application. `dotnet pack` produces a NuGet package other solutions can use. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Kinichit.Communication</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Kinichit Labs</Authors>
+    <Description>Email and SMS sending behind one interface each, with providers chosen in configuration (Log, Pickup, SMTP, SendGrid; Log, Twilio, MSG91).</Description>
+    <RepositoryUrl>https://github.com/SantoshRamancha/CommunicationProvider</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kinichit.Communication.Tests" />
+  </ItemGroup>
+
+</Project>
