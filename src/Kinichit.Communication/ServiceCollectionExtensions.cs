@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Kinichit.Communication;
 
@@ -36,6 +37,47 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddSingleton<ICommunicationStatus>(new CommunicationStatus(emailStatus, smsStatus));
+        return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="IEmailQueue"/> and <see cref="EmailQueueProcessor"/> from the <c>EmailQueue</c> section. Call it after
+    /// <see cref="AddCommunication"/>: the processor sends through that <see cref="IEmailSender"/>. The SqlServer store (default) uses
+    /// <c>EmailQueue:ConnectionString</c>, or else <c>ConnectionStrings:DefaultConnection</c>. To keep the queue somewhere else,
+    /// register your own <see cref="IEmailQueueStore"/> first.
+    /// </summary>
+    public static IServiceCollection AddEmailQueue(this IServiceCollection services, IConfiguration configuration, string section = "EmailQueue")
+    {
+        if (!services.Any(d => d.ServiceType == typeof(IEmailSender)))
+            throw new InvalidOperationException("Call AddCommunication before AddEmailQueue: the queue sends through its IEmailSender.");
+
+        var o = configuration.GetSection(section).Get<EmailQueueOptions>() ?? new EmailQueueOptions();
+        services.Configure<EmailQueueOptions>(configuration.GetSection(section));
+        services.TryAddSingleton(TimeProvider.System);
+
+        if (!services.Any(d => d.ServiceType == typeof(IEmailQueueStore)))
+        {
+            var store = string.IsNullOrWhiteSpace(o.Store) ? EmailQueueStores.SqlServer : o.Store.Trim();
+            if (string.Equals(store, EmailQueueStores.SqlServer, StringComparison.OrdinalIgnoreCase))
+            {
+                var connectionString = string.IsNullOrWhiteSpace(o.ConnectionString) ? configuration.GetConnectionString(o.ConnectionStringName) : o.ConnectionString;
+                if (string.IsNullOrWhiteSpace(connectionString))
+                    throw new InvalidOperationException($"The email queue needs {section}:ConnectionString or ConnectionStrings:{o.ConnectionStringName}.");
+                services.AddSingleton<IEmailQueueStore>(new SqlServerEmailQueueStore(connectionString, o.Schema, o.PrepareSchema, o.MaxAttempts));
+            }
+            else if (string.Equals(store, EmailQueueStores.InMemory, StringComparison.OrdinalIgnoreCase))
+            {
+                services.AddSingleton<IEmailQueueStore>(new InMemoryEmailQueueStore(o.MaxAttempts));
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"{section}:Store '{o.Store}' is not supported. Use one of: {EmailQueueStores.SqlServer}, {EmailQueueStores.InMemory}.");
+            }
+        }
+
+        services.TryAddSingleton<IEmailQueue, EmailQueue>();
+        services.TryAddTransient<EmailQueueProcessor>();
         return services;
     }
 

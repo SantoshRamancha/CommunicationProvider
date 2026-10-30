@@ -9,9 +9,9 @@
     <!-- Shared library: no reference to any application. `dotnet pack` produces a NuGet package other solutions can use. -->
     <IsPackable>true</IsPackable>
     <PackageId>Kinichit.Communication</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>Kinichit Labs</Authors>
-    <Description>Email and SMS sending behind one interface each, with providers chosen in configuration (Log, Pickup, SMTP, SendGrid; Log, Twilio, MSG91).</Description>
+    <Description>Email and SMS sending behind one interface each, with providers chosen in configuration (Log, Pickup, SMTP, SendGrid; Log, Twilio, MSG91), plus an email queue in SQL Server that records what was sent and what wasn't.</Description>
     <RepositoryUrl>https://github.com/SantoshRamancha/CommunicationProvider</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -20,9 +20,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.6" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
   </ItemGroup>
 

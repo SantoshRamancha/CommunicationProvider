@@ -6,6 +6,7 @@ This is a shared .NET 8 library for sending **email** and **SMS** from any of ou
 |---|---|---|
 | Email | `IEmailSender` | `Log` (default: writes to the log), `Pickup` (saves `.eml` files to a folder), `Smtp` (Office 365, Gmail/Workspace, Zoho, any host), `SendGrid` |
 | SMS | `ISmsSender` | `Log` (default), `Twilio` (free text), `Msg91` (India DLT templates) |
+| Email queue | `IEmailQueue` | SQL Server tables in the app's own database; a Hangfire job sends them ([below](#email-queue)) |
 
 What else it does:
 
@@ -22,7 +23,7 @@ What else it does:
    ```
 2. **In the app's repository**, copy `nuget.config.sample` to `nuget.config` next to the `.sln`, then install the package:
    ```bash
-   dotnet add package Kinichit.Communication --version 1.0.0
+   dotnet add package Kinichit.Communication --version 1.1.0
    ```
 3. **Register** it at startup:
    ```csharp
@@ -66,13 +67,77 @@ What else it does:
    ```
    A failed send throws `CommunicationException`. Its message is safe to show to users; the provider's full error is in the log.
 
+## Email queue
+
+`IEmailSender` sends straight away, so when it fails during a request the email is lost, and nobody can see later what went out. The queue is the same process EngageNow uses, in the same `EmailQueueItems` table layout: the app **stores** each email, and a **Hangfire** job sends it, so you can always see what was sent and what wasn't.
+
+- **Where it lives:** `[dbo].[EmailQueueItems]` in the app's own SQL Server database, plus `[dbo].[EmailQueueItemAttachments]` for attachment contents. Both are created on first use (as Hangfire creates its own tables), so the app needs no migration.
+- **Columns:** `IsDeleted`, `Id`, `Body`, `Date`, `EnableSsl`, `Html`, `SenderAddress`, `SenderName`, `Subject`, `To`, `Attachments`, `Bcc`, `Cc`, `Retries`, `Category` and `Template`, as in EngageNow without the per-row SMTP settings.
+  - `To`, `Cc` and `Bcc` are comma-separated addresses; `Attachments` lists the file names.
+  - `Body` is the HTML body (`Html = 1`), or the text body when there is no HTML (`Html = 0`).
+  - `Date` is when the email was queued (UTC), or when it may be sent if it was held or retried.
+  - `EnableSsl` records `Email:Smtp:EnableSsl`; sending uses the `Email` settings.
+- **Sent / not sent:** a sent email gets `IsDeleted = 1`. An unsent one keeps `IsDeleted = 0`, and `Retries` counts its failed tries. After 5 (`MaxAttempts`) it counts as Failed and is not tried again until an admin presses **Retry**. The tries are 1, 5, 15 and 60 minutes apart, counted from `Date`. An invalid email fails at once. The reason for a failure is in the app's log.
+- **Safe to run twice:** the run sending an email keeps its row locked, so another run or app instance never sends it too. If the app stops in the middle of a send, the lock is released and a later run sends it (so in that rare case it can arrive twice).
+
+### Set it up in an app
+
+1. **Register** it after `AddCommunication`, and add Hangfire (packages `Hangfire.AspNetCore` and `Hangfire.SqlServer`):
+   ```csharp
+   builder.Services.AddCommunication(builder.Configuration);
+   builder.Services.AddEmailQueue(builder.Configuration);   // uses ConnectionStrings:DefaultConnection
+
+   builder.Services.AddHangfire(c => c.UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection")));
+   builder.Services.AddHangfireServer();
+   ```
+2. **Schedule** the two jobs at startup:
+   ```csharp
+   var jobs = app.Services.GetRequiredService<IRecurringJobManager>();
+   jobs.AddOrUpdate<EmailQueueProcessor>("email-queue", p => p.ProcessAsync(CancellationToken.None), "*/15 * * * * *");  // every 15 seconds
+   jobs.AddOrUpdate<EmailQueueProcessor>("email-queue-cleanup", p => p.CleanUpAsync(CancellationToken.None), Cron.Daily(3));
+   ```
+   Hangfire passes its own cancellation token in place of `CancellationToken.None`.
+3. **Queue** emails instead of sending them:
+   ```csharp
+   public class OrderMailer(IEmailQueue queue)
+   {
+       public Task ConfirmAsync(Order order, CancellationToken ct) =>
+           queue.EnqueueAsync(new EmailMessage(order.CustomerEmail, $"Order {order.Number} confirmed") { HtmlBody = "<p>…</p>" },
+               category: "orders", template: "order-confirmation", ct: ct);
+   }
+   ```
+   `EnqueueAsync` checks the email immediately and throws `ArgumentException` if it could never be sent or doesn't fit the table (for example a subject over 200 characters, or a Reply-To, which the table has no column for). The sender is the email's `From`, or `Email:FromAddress` / `FromName`.
+4. **Track** them on an admin screen with the same `IEmailQueue`:
+   - `ListAsync(new EmailQueueFilter { Status = EmailQueueStatus.Failed, Search = "anil@" })` lists emails, newest first, without the body. You can filter by status, category, template, a date range and search text (To, Cc, Bcc, Subject).
+   - `GetAsync(id)` returns one email with its body and sender.
+   - `CountsAsync()` returns the number of Pending, Sent and Failed emails.
+   - `RetryAsync(id)` sends a Failed email again.
+
+   The table can also be read directly in SSMS.
+
+### Settings (`EmailQueue` section, all optional)
+
+| Setting | Default | |
+|---|---|---|
+| `Store` | `SqlServer` | `InMemory` for tests (lost on restart) |
+| `ConnectionString` | — | When empty, `ConnectionStrings:{ConnectionStringName}` is used |
+| `ConnectionStringName` | `DefaultConnection` | |
+| `Schema` | `dbo` | Schema of the two tables |
+| `PrepareSchema` | `true` | Create the tables on first use. The app's login needs CREATE TABLE once; set `false` if a DBA creates them |
+| `SendingEnabled` | `true` | `false` pauses sending; emails stay Pending |
+| `MaxPerRun` | `200` | Most emails one run sends |
+| `MaxAttempts` | `5` | Tries before an email counts as Failed |
+| `RetainDays` | `90` | The daily clean-up deletes Sent and Failed emails dated more than this many days ago |
+
+The queue keeps the email body, so a password or OTP in an email stays in the table until the clean-up deletes it. Send such emails with `IEmailSender` directly instead.
+
 ## Develop and release
 
 ```bash
 dotnet test CommunicationProvider.sln
 ```
 
-The 26 tests make no network calls; providers are checked by capturing the requests they would send.
+The tests make no network calls; providers are checked by capturing the requests they would send. The email queue tests run against the in-memory store. To also run them against SQL Server, set `COMMUNICATION_TEST_SQLSERVER` to a connection string for a database where the tests may create schemas; each test creates its own schema and drops it afterwards. GitHub Actions does this with a temporary SQL Server container.
 
 **Releasing a version:**
 1. Merge the change to `main`.
