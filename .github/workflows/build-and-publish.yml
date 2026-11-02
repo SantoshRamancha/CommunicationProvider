@@ -33,6 +33,21 @@ jobs:
 
       - run: dotnet restore CommunicationProvider.sln
       - run: dotnet build CommunicationProvider.sln -c Release --no-restore -p:Version=${{ steps.version.outputs.value }}
+
+      # Throwaway SQL Server so the email queue's SqlServer store is tested too. The password is generated per run.
+      - name: Start SQL Server for the email queue tests
+        shell: bash
+        run: |
+          pw="Kc$(openssl rand -hex 12)!a1"
+          echo "::add-mask::$pw"
+          docker run -d --name sql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=$pw" -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
+          for i in $(seq 1 60); do
+            docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$pw" -Q "SELECT 1" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$pw" -Q "CREATE DATABASE CommunicationTests"
+          echo "COMMUNICATION_TEST_SQLSERVER=Server=localhost,1433;Database=CommunicationTests;User Id=sa;Password=$pw;TrustServerCertificate=true" >> "$GITHUB_ENV"
+
       - run: dotnet test CommunicationProvider.sln -c Release --no-build
 
       - name: Pack
